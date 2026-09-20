@@ -67,3 +67,25 @@ def upright_exp(
     # compute the error against the upright reference (0, 0, -1)
     tilt_error = torch.square(asset.data.projected_gravity_b[:, 2] + 1.0)
     return torch.exp(-tilt_error / std**2)
+
+
+def stand_up_exp(
+    env: ManagerBasedRLEnv,
+    target_height: float,
+    height_std: float,
+    upright_std: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward standing up as the product of the height and the upright kernels.
+
+    Note:
+        The product means neither half can be cashed in on its own: sitting upright on the floor
+        scores as poorly as lying down at the right height. Since exp(-a) * exp(-b) = exp(-(a+b)),
+        this is a single kernel over both errors.
+    """
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    # compute both errors
+    height_error = torch.square(asset.data.root_pos_w[:, 2] - target_height)
+    tilt_error = torch.square(asset.data.projected_gravity_b[:, 2] + 1.0)
+    return torch.exp(-height_error / height_std**2 - tilt_error / upright_std**2)

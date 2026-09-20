@@ -198,7 +198,7 @@ class EventCfg:
         func=mdp.reset_joints_by_scale,
         mode="reset",
         params={
-            "position_range": (0.5, 1.5),
+            "position_range": (1.0, 1.0),
             "velocity_range": (0.0, 0.0),
         },
     )
@@ -208,18 +208,27 @@ class EventCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    # -- task
-    # no sensor_cfg: on flat ground the target is absolute, which removes the ray-caster from
-    # the equation entirely
+    # -- task: the product carries the objective, so height and uprightness cannot be cashed in
+    # separately. No sensor_cfg on flat ground, the target is absolute.
+    stand_up_exp = RewTerm(
+        func=mdp.stand_up_exp,
+        weight=2.0,
+        params={
+            "target_height": 0.74,
+            "height_std": 0.5,
+            "upright_std": 1.0,
+        },
+    )
+    # -- shaping, kept at low weight mostly so both halves stay visible in the logs
     track_height = RewTerm(
         func=mdp.track_height,
-        weight=2.0,
+        weight=0.25,
         params={
             "target_height": 0.74,
             "std": 0.5,
         },
     )
-    upright_exp = RewTerm(func=mdp.upright_exp, weight=1.0, params={"std": 1.0})
+    upright_exp = RewTerm(func=mdp.upright_exp, weight=0.25, params={"std": 1.0})
     # -- penalties
     dof_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
     dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
