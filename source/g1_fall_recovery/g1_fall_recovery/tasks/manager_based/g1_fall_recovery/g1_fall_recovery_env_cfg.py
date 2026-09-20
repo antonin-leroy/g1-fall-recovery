@@ -13,7 +13,7 @@ from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
-from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 from . import mdp
@@ -46,11 +46,6 @@ class MySceneCfg(InteractiveSceneCfg):
             restitution_combine_mode="multiply",
             static_friction=1.0,
             dynamic_friction=1.0,
-        ),
-        visual_material=sim_utils.MdlFileCfg(
-            mdl_path=f"{ISAACLAB_NUCLEUS_DIR}/Materials/TilesMarbleSpiderWhiteBrickBondHoned/TilesMarbleSpiderWhiteBrickBondHoned.mdl",
-            project_uvw=True,
-            texture_scale=(0.25, 0.25),
         ),
         debug_vis=False,
     )
@@ -169,9 +164,9 @@ class EventCfg:
         },
     )
 
-    # spawn the robot lying down, slightly above the ground, with a random heading and roll:
-    # the z offset is relative to the default standing height (0.74 m), so the pelvis starts
-    # around 0.44-0.54 m and settles into a prone/supine/side pose under gravity
+    # spawn the robot face down, already touching the ground, with a random heading: the z offset
+    # is relative to the default standing height (0.74 m), so the pelvis starts at 0.12-0.17 m,
+    # and the pitch near pi/2 lays the body flat instead of dropping it from standing height
     reset_base = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
@@ -179,8 +174,9 @@ class EventCfg:
             "pose_range": {
                 "x": (-0.5, 0.5),
                 "y": (-0.5, 0.5),
-                "z": (-0.3, -0.2),
-                "roll": (-3.14, 3.14),
+                "z": (-0.62, -0.57),
+                "roll": (-0.3, 0.3),
+                "pitch": (1.4, 1.75),
                 "yaw": (-3.14, 3.14),
             },
             "velocity_range": {
@@ -198,7 +194,7 @@ class EventCfg:
         func=mdp.reset_joints_by_scale,
         mode="reset",
         params={
-            "position_range": (1.0, 1.0),
+            "position_range": (0.8, 1.2),
             "velocity_range": (0.0, 0.0),
         },
     )
