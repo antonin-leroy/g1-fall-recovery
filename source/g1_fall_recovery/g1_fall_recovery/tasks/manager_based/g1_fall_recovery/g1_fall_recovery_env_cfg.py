@@ -21,7 +21,7 @@ from . import mdp
 ##
 # Pre-defined configs
 ##
-from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG  # isort: skip
+
 from isaaclab_assets import G1_MINIMAL_CFG  # isort: skip
 
 
@@ -34,12 +34,12 @@ from isaaclab_assets import G1_MINIMAL_CFG  # isort: skip
 class MySceneCfg(InteractiveSceneCfg):
     """Configuration for the terrain scene with a legged robot."""
 
-    # ground terrain
+    # ground terrain: flat, so the pelvis height can be compared to an absolute target and the
+    # robot only has to solve the recovery, not the terrain
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
-        terrain_type="generator",
-        terrain_generator=ROUGH_TERRAINS_CFG,
-        max_init_terrain_level=5,
+        terrain_type="plane",
+        terrain_generator=None,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -85,7 +85,14 @@ class MySceneCfg(InteractiveSceneCfg):
 class ActionsCfg:
     """Action specifications for the MDP."""
 
-    joint_pos = mdp.JointPositionActionCfg(asset_name="robot", joint_names=[".*"], scale=0.5, use_default_offset=True)
+    # the 14 finger joints are useless to stand up and only dilute the exploration noise,
+    # so only the 23 body joints are actuated by the policy
+    joint_pos = mdp.JointPositionActionCfg(
+        asset_name="robot",
+        joint_names=[".*_hip_.*", ".*_knee_joint", ".*_ankle_.*", "torso_joint", ".*_shoulder_.*", ".*_elbow_.*"],
+        scale=0.5,
+        use_default_offset=True,
+    )
 
 
 @configclass
@@ -106,12 +113,6 @@ class ObservationsCfg:
         joint_pos = ObsTerm(func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01))
         joint_vel = ObsTerm(func=mdp.joint_vel_rel, noise=Unoise(n_min=-1.5, n_max=1.5))
         actions = ObsTerm(func=mdp.last_action)
-        height_scan = ObsTerm(
-            func=mdp.height_scan,
-            params={"sensor_cfg": SceneEntityCfg("height_scanner")},
-            noise=Unoise(n_min=-0.1, n_max=0.1),
-            clip=(-1.0, 1.0),
-        )
 
         def __post_init__(self):
             self.enable_corruption = True
@@ -208,20 +209,21 @@ class RewardsCfg:
     """Reward terms for the MDP."""
 
     # -- task
+    # no sensor_cfg: on flat ground the target is absolute, which removes the ray-caster from
+    # the equation entirely
     track_height = RewTerm(
         func=mdp.track_height,
-        weight=1.0,
+        weight=2.0,
         params={
             "target_height": 0.74,
             "std": 0.5,
-            "sensor_cfg": SceneEntityCfg("height_scanner"),
         },
     )
     upright_exp = RewTerm(func=mdp.upright_exp, weight=1.0, params={"std": 1.0})
     # -- penalties
     dof_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
     dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
+    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.002)
     # -- optional penalties
     dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=0.0)
 
@@ -258,9 +260,11 @@ class G1FallRecoveryEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # scene settings
         self.scene.robot = G1_MINIMAL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        # flat ground: nothing reads the height scanner any more
+        self.scene.height_scanner = None
         # general settings
         self.decimation = 4
-        self.episode_length_s = 20.0
+        self.episode_length_s = 10.0
         # simulation settings
         self.sim.dt = 0.005
         self.sim.render_interval = self.decimation
