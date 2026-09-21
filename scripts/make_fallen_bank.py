@@ -111,7 +111,16 @@ def main():
         # its lowest body clears the ground.
         body_z = robot.data.body_pos_w[..., 2] - env.scene.env_origins[:, 2].unsqueeze(1)
         lowest = body_z[:, collision_bodies].min(dim=1).values
-        lift = torch.clamp(-lowest, min=0.0) + 0.005
+        # capped at 2 cm: enough to clear a real contact penetration, and small enough that a
+        # collisionless link drifting below the floor can never launch the robot into the air
+        lift = torch.clamp(-lowest, min=0.0, max=0.02)
+
+        if round_idx == 0:
+            # which links actually go below the floor, and by how much, across the whole population
+            mins = body_z.min(dim=0).values
+            print("[DEBUG]: 12 lowest links over all envs (negative = under the floor):")
+            for i in torch.argsort(mins)[:12]:
+                print(f"           {robot.body_names[int(i)]:<30} min z = {mins[int(i)]:+.3f}")
 
         # record the settled state, with positions relative to the environment origin
         root_pose = robot.data.root_state_w[:, 0:7].clone()
