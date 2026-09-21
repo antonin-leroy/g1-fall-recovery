@@ -61,3 +61,31 @@ def reset_from_fallen_bank(
     # the robot is at rest, so the joint velocities start at zero
     joint_pos = bank["joint_pos"][indices].clone()
     asset.write_joint_state_to_sim(joint_pos, torch.zeros_like(joint_pos), env_ids=env_ids)
+
+
+def apply_upward_assist(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    max_force_scale: float,
+    decay_steps: int,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", body_names="torso_link"),
+):
+    """Pull the torso up with a fraction of the robot weight, fading out as training progresses.
+
+    Standing up is a long coordinated motion that Gaussian exploration almost never stumbles on.
+    Lifting the robot early lets it reach and be rewarded for upright states, and the assist is
+    annealed to zero so the final policy stands up unaided.
+    """
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    # linear anneal over the first ``decay_steps`` environment steps, then nothing
+    progress = min(env.common_step_counter / decay_steps, 1.0)
+    scale = max_force_scale * (1.0 - progress)
+    # express the assist as a fraction of the robot weight so it does not depend on the model
+    weight = asset.data.default_mass.to(env.device).sum(dim=1) * 9.81
+    forces = torch.zeros(len(env_ids), len(asset_cfg.body_ids), 3, device=env.device)
+    forces[:, 0, 2] = scale * weight[env_ids]
+    # is_global: the robot starts lying down, so "up" has to be the world up, not the body up
+    asset.set_external_force_and_torque(
+        forces, torch.zeros_like(forces), body_ids=asset_cfg.body_ids, env_ids=env_ids, is_global=True
+    )

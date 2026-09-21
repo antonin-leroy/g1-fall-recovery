@@ -21,7 +21,7 @@ parser = argparse.ArgumentParser(description="Record a bank of settled fallen st
 parser.add_argument("--task", type=str, default="Template-G1-Fall-Recovery-v0", help="Name of the task.")
 parser.add_argument("--num_envs", type=int, default=512, help="Number of environments to drop at once.")
 parser.add_argument("--num_rounds", type=int, default=8, help="Number of drop rounds to record.")
-parser.add_argument("--settle_steps", type=int, default=120, help="Environment steps to let the robots settle.")
+parser.add_argument("--settle_steps", type=int, default=250, help="Environment steps to let the robots settle.")
 parser.add_argument("--drop_height", type=float, default=0.9, help="Pelvis height at the start of a drop, in meters.")
 parser.add_argument("--output", type=str, default=None, help="Where to write the bank. Defaults to the mdp folder.")
 # append AppLauncher cli args
@@ -95,12 +95,24 @@ def main():
         for _ in range(args_cli.settle_steps):
             env.step(actions)
 
+        # settling does not always resolve interpenetration, and a state written back with a limb
+        # inside the floor makes the episode start on a depenetration kick. Lift each robot until
+        # its lowest body clears the ground.
+        body_z = robot.data.body_pos_w[..., 2] - env.scene.env_origins[:, 2].unsqueeze(1)
+        lowest = body_z.min(dim=1).values
+        lift = torch.clamp(-lowest, min=0.0) + 0.005
+
         # record the settled state, with positions relative to the environment origin
         root_pose = robot.data.root_state_w[:, 0:7].clone()
         root_pose[:, 0:3] -= env.scene.env_origins
+        root_pose[:, 2] += lift
         root_poses.append(root_pose.cpu())
         joint_positions.append(robot.data.joint_pos.clone().cpu())
-        print(f"[INFO]: round {round_idx + 1}/{args_cli.num_rounds} recorded ({num_envs} states)")
+        print(
+            f"[INFO]: round {round_idx + 1}/{args_cli.num_rounds} recorded ({num_envs} states),"
+            f" {(lowest < 0).float().mean() * 100:.0f}% were clipping the floor,"
+            f" max lift {lift.max():.3f} m"
+        )
 
     bank = {"root_pose": torch.cat(root_poses), "joint_pos": torch.cat(joint_positions)}
     os.makedirs(os.path.dirname(output), exist_ok=True)

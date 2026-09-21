@@ -154,22 +154,23 @@ class EventCfg:
     )
 
     # reset
-    base_external_force_torque = EventTerm(
-        func=mdp.apply_external_force_torque,
-        mode="reset",
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names="torso_link"),
-            "force_range": (0.0, 0.0),
-            "torque_range": (-0.0, 0.0),
-        },
-    )
-
     # start from a state a real fall produces: the bank is recorded offline by dropping robots
     # and letting them settle, so the episode begins with the robot already at rest on the ground
     # instead of in mid-air. Generate it with 'python scripts/make_fallen_bank.py'.
     reset_from_bank = EventTerm(
         func=mdp.reset_from_fallen_bank,
         mode="reset",
+    )
+
+    # HoST-style assist: hold 80% of the robot weight up at the start of training and fade it to
+    # zero over the first 30k steps, so the policy first discovers what standing feels like
+    upward_assist = EventTerm(
+        func=mdp.apply_upward_assist,
+        mode="reset",
+        params={
+            "max_force_scale": 0.8,
+            "decay_steps": 30000,
+        },
     )
 
 
