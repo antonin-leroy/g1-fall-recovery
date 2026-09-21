@@ -1,135 +1,227 @@
-# Template for Isaac Lab Projects
+# G1 Fall Recovery
 
-## Overview
+Teaching a Unitree G1 humanoid to stand back up from the ground, with reinforcement
+learning in Isaac Lab.
 
-This project/repository serves as a template for building projects or extensions based on Isaac Lab.
-It allows you to develop in an isolated environment, outside of the core Isaac Lab repository.
+The policy starts from a state a real fall produces — lying prone, supine or on its
+side — and has ten simulated seconds to get its pelvis back to standing height and
+hold it there.
 
-**Key Features:**
+<p align="center">
+  <img src="media/07-final-policy.gif" width="520" alt="The trained policy standing four G1 robots up from the ground, with no assistance">
+</p>
 
-- `Isolation` Work outside the core Isaac Lab repository, ensuring that your development efforts remain self-contained.
-- `Flexibility` This template is set up to allow your code to be run as an extension in Omniverse.
+<p align="center"><em>Final policy, deterministic inference, no assist force.</em></p>
 
-**Keywords:** extension, template, isaaclab
+---
 
-## Installation
+## Result
 
-- Install Isaac Lab by following the [installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html).
-  We recommend using the conda or uv installation as it simplifies calling Python scripts from the terminal.
+| Metric | Value |
+|---|---|
+| `stand_up_exp` (max 2.0) | **1.95** |
+| Pelvis height error vs. the 0.74 m target | ~8 cm, time-averaged over the episode |
+| Base tilt | `projected_gravity_b[:, 2]` ≈ −0.99 (vertical) |
+| Horizontal drift | ~0.27 m/s RMS — it stands up in place |
+| Training cost | 3000 PPO iterations, ~295M simulated steps, **~40 min on one RTX 4090** |
 
-- Clone or copy this project/repository separately from the Isaac Lab installation (i.e. outside the `IsaacLab` directory):
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="media/00-curves-dark.png">
+  <img src="media/00-curves-light.png" alt="Episode_Reward/stand_up_exp across three runs: flat at 0.31 without the assist, rising to about 1.96 with it, and holding at 1.95 once the posture penalties are switched on">
+</picture>
 
-- Using a python interpreter that has Isaac Lab installed, install the library in editable mode using:
+The blue curve is the whole story: with a correct reward, a correct initial-state
+distribution and 3000 iterations of PPO, the robot **never learns to stand up**. What
+unlocks the task is the assist-force curriculum, not any amount of reward tuning.
 
-    ```bash
-    # use 'PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-    python -m pip install -e source/g1_fall_recovery
+---
 
-- Verify that the extension is correctly installed by:
+## Setup
 
-    - Listing the available tasks:
+| | |
+|---|---|
+| Simulator | Isaac Lab 2.3.2 / Isaac Sim 5.1 |
+| Robot | `G1_MINIMAL_CFG`, 44 bodies, 37 DOF |
+| Parallel envs | 4096 |
+| Episode | 10 s — 500 steps at 50 Hz control, 200 Hz physics |
+| Observations | 106 — base linear/angular velocity, projected gravity, joint positions and velocities, last action |
+| Actions | **23** joint position targets — the 14 finger joints are excluded |
+| Algorithm | PPO (rsl_rl), actor & critic MLP `[512, 256, 128]`, ELU |
+| Terrain | flat plane |
 
-        Note: It the task name changes, it may be necessary to update the search pattern `"Template-"`
-        (in the `scripts/list_envs.py` file) so that it can be listed.
+Only `time_out` ends an episode. There is deliberately no early termination: on a
+get-up task, any contact-based termination fires on the very state the robot is
+supposed to recover from.
 
-        ```bash
-        # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-        python scripts/list_envs.py
-        ```
+### Reward
 
-    - Running a task:
+One term carries the objective:
 
-        ```bash
-        # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-        python scripts/<RL_LIBRARY>/train.py --task=<TASK_NAME>
-        ```
+```python
+stand_up_exp = exp(-(h - 0.74)² / 0.5² - (g_z + 1)² / 1.0²)      # weight 2.0
+```
 
-    - Running a task with dummy agents:
+`h` is the pelvis height; `g_z` is the vertical component of gravity expressed in the
+base frame (−1 upright, 0 on the side, +1 upside down).
 
-        These include dummy agents that output zero or random agents. They are useful to ensure that the environments are configured correctly.
+The two halves are **multiplied, not added**. That is not cosmetic — see stage 1.
 
-        - Zero-action agent
+Everything else is shaping or regularisation: `track_height` and `upright_exp` at
+weight 0.25 so both halves stay legible in the logs, plus posture penalties introduced
+by curriculum.
 
-            ```bash
-            # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-            python scripts/zero_agent.py --task=<TASK_NAME>
-            ```
-        - Random-action agent
+---
 
-            ```bash
-            # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
-            python scripts/random_agent.py --task=<TASK_NAME>
-            ```
+## How it got there
 
-### Set up IDE (Optional)
+Four stages, each fixing what the previous one exposed.
 
-To setup the IDE, please follow these instructions:
+### 1. Additive rewards → reward hacking
 
-- Run VSCode Tasks, by pressing `Ctrl+Shift+P`, selecting `Tasks: Run Task` and running the `setup_python_env` in the drop down menu.
-  When running this task, you will be prompted to add the absolute path to your Isaac Sim installation.
+<img src="media/01-reward-hacking.gif" width="440" alt="Robots sitting upright on the ground with their legs splayed, never lifting themselves">
 
-If everything executes correctly, it should create a file .python.env in the `.vscode` directory.
-The file contains the python paths to all the extensions provided by Isaac Sim and Omniverse.
-This helps in indexing all the python modules for intelligent suggestions while writing code.
+Height and uprightness were two separate reward terms, added. The policy converged to
+`upright_exp` = 0.96 out of 1.0 while `track_height` stayed at 0.12 — it had found a
+pose that collects the uprightness reward **without ever lifting its own weight**:
+sitting on the floor, legs splayed, torso vertical.
 
-### Setup as Omniverse Extension (Optional)
+That is 44% of the available task reward for no effort, and the saturated term offered
+no gradient to do better.
 
-We provide an example UI extension that will load upon enabling your extension defined in `source/g1_fall_recovery/g1_fall_recovery/ui_extension_example.py`.
+**Fix:** multiply the two kernels instead of adding them. Upright while flat on the
+floor now scores as poorly as lying down at the right height.
 
-To enable your extension, follow these steps:
+### 2. Multiplicative reward → the exploration wall
 
-1. **Add the search path of this project/repository** to the extension manager:
-    - Navigate to the extension manager using `Window` -> `Extensions`.
-    - Click on the **Hamburger Icon**, then go to `Settings`.
-    - In the `Extension Search Paths`, enter the absolute path to the `source` directory of this project/repository.
-    - If not already present, in the `Extension Search Paths`, enter the path that leads to Isaac Lab's extension directory directory (`IsaacLab/source`)
-    - Click on the **Hamburger Icon**, then click `Refresh`.
+<img src="media/02-flailing.gif" width="440" alt="Robots thrashing on the ground without managing to stand">
 
-2. **Search and enable your extension**:
-    - Find your extension under the `Third Party` category.
-    - Toggle it to enable your extension.
+The exploit was gone, and the robot learned nothing at all. Between iteration 930 and
+2057 — 110M simulated steps — `stand_up_exp` moved by 0.0006. Standing up is a
+coordinated two-to-three-second motion; Gaussian noise on 23 joints does not stumble
+onto it.
 
-## Code formatting
+This is where reward engineering stops helping.
 
-We have a pre-commit template to automatically format your code.
-To install pre-commit:
+### 3. A bank of real fallen states
+
+Before fixing exploration, the starting states had to be honest. Spawning the robot in
+mid-air with a random orientation taught it to *catch itself when dropped*, not to get
+up off the floor.
+
+`scripts/make_fallen_bank.py` drops 512 robots from 0.9 m with fully random
+orientations and random held joint targets, lets physics settle them for five seconds,
+and records the resulting root pose and joint configuration. Eight rounds give 4096
+states, sampled at every reset.
+
+### 4. The upward assist curriculum
+
+Straight from HoST: hold the robot up early so it can reach and be rewarded for
+standing states, then take the help away.
+
+An external force is applied to `torso_link` in the **world** frame — the robot starts
+lying down, so "up" cannot be the body frame — worth 80% of body weight, annealed
+linearly to zero over the first 30 000 environment steps (iteration ~1250).
+
+That single change took `stand_up_exp` from 0.31 to 1.96. The policy stands unaided for
+the last 1750 iterations, long after the assist is gone.
+
+### 5. Posture penalties, introduced by curriculum
+
+The robot now stood up — while twitching and wandering off. Penalties on horizontal
+velocity, foot slide, torso rotation and action rate fixed that, but only once they
+were introduced **after** the get-up was already learned.
+
+Applied from step zero, they collapsed the run: staying still became cheaper than
+moving, the action noise std fell from 0.85 to **0.13**, entropy went negative, and the
+policy settled back onto the floor. Those three log lines are the signature of an
+exploration collapse.
+
+`CurriculumCfg` switches each penalty on at 40 000 steps via `modify_reward_weight`,
+and `entropy_coef` went from 0.008 to 0.015. Final `stand_up_exp` 1.95 instead of
+1.96 — a clean motion costs 0.5%.
+
+---
+
+## Training progression
+
+Clips from the final run, evenly spaced. These show *training* behaviour, so the
+actions carry exploration noise — the deployed policy is smoother.
+
+| Step 0 — assist at full strength | Step 20 000 — assist fading |
+|---|---|
+| <img src="media/03-train-step0.gif" width="380" alt="Start of training, robots held up by the assist force"> | <img src="media/04-train-step20k.gif" width="380" alt="Mid training, the assist fades and the robots begin to support themselves"> |
+
+| Step 40 000 — unaided, penalties switching on | Step 70 000 — converged |
+|---|---|
+| <img src="media/05-train-step40k.gif" width="380" alt="Robots standing without assistance as the posture penalties activate"> | <img src="media/06-train-step70k.gif" width="380" alt="End of training, robots standing up cleanly and holding still"> |
+
+---
+
+## Reproducing
 
 ```bash
-pip install pre-commit
+# with a Python interpreter that has Isaac Lab installed
+python -m pip install -e source/g1_fall_recovery
+
+# 1. record the fallen-state bank (a few minutes)
+python scripts/make_fallen_bank.py --headless
+
+# 2. train (~40 min on an RTX 4090)
+python scripts/rsl_rl/train.py --task Template-G1-Fall-Recovery-v0 --headless \
+  --video --video_interval 10000 --video_length 500
+
+# 3. play the result and export the policy to TorchScript / ONNX
+python scripts/rsl_rl/play.py --task Template-G1-Fall-Recovery-v0 --headless \
+  --num_envs 4 --video --video_length 500
 ```
 
-Then you can run pre-commit with:
+A pre-recorded bank is committed at
+`source/g1_fall_recovery/g1_fall_recovery/tasks/manager_based/g1_fall_recovery/mdp/fallen_states.pt`,
+so step 1 is optional.
 
-```bash
-pre-commit run --all-files
+---
+
+## Engineering notes
+
+Things that cost real time, written down so they cost it only once.
+
+**`Episode_Reward/<term>` is not an episode sum.** Isaac Lab divides it by
+`max_episode_length_s`, so it reads as `weight × mean(f)`. Reading it as a sum makes
+every number wrong by a factor of the episode length.
+
+**A `SceneEntityCfg` left as a default argument is never resolved.** Only the ones
+passed through a term's `params` are matched against the scene, so `body_ids` silently
+stays `slice(None)`.
+
+**The G1 has 44 bodies and many carry no collision geometry** — fingers, palms. Their
+frames drift freely below the floor, so a naive "is any body below ground" check
+reports 96% of the robots as buried when none of them are.
+
+**Curriculum events keyed on `env.common_step_counter` restart at zero in `play.py`.**
+The assist force was being applied at full strength during playback, throwing around a
+policy trained to stand without it. `play.py` now disables it explicitly — the same
+trap applies to anything deployed on hardware.
+
+---
+
+## Layout
+
+```
+scripts/
+  make_fallen_bank.py            # records the bank of settled fallen states
+  rsl_rl/train.py, play.py
+source/g1_fall_recovery/g1_fall_recovery/tasks/manager_based/g1_fall_recovery/
+  g1_fall_recovery_env_cfg.py    # scene, observations, rewards, events, curriculum
+  mdp/rewards.py                 # stand_up_exp, track_height, upright_exp, base_lin_vel_xy_l2
+  mdp/events.py                  # reset_from_fallen_bank, apply_upward_assist
+  agents/rsl_rl_ppo_cfg.py
 ```
 
-## Troubleshooting
+---
 
-### Pylance Missing Indexing of Extensions
+## Next
 
-In some VsCode versions, the indexing of part of the extensions is missing.
-In this case, add the path to your extension in `.vscode/settings.json` under the key `"python.analysis.extraPaths"`.
-
-```json
-{
-    "python.analysis.extraPaths": [
-        "<path-to-ext-repo>/source/g1_fall_recovery"
-    ]
-}
-```
-
-### Pylance Crash
-
-If you encounter a crash in `pylance`, it is probable that too many files are indexed and you run out of memory.
-A possible solution is to exclude some of omniverse packages that are not used in your project.
-To do so, modify `.vscode/settings.json` and comment out packages under the key `"python.analysis.extraPaths"`
-Some examples of packages that can likely be excluded are:
-
-```json
-"<path-to-isaac-sim>/extscache/omni.anim.*"         // Animation packages
-"<path-to-isaac-sim>/extscache/omni.kit.*"          // Kit UI tools
-"<path-to-isaac-sim>/extscache/omni.graph.*"        // Graph UI tools
-"<path-to-isaac-sim>/extscache/omni.services.*"     // Services tools
-...
-```
+- Rough terrain — the flat plane was chosen to separate getting up from handling the ground.
+- Sim-to-sim validation in MuJoCo before anything touches hardware.
+- A wider bank: the current one is built from free-fall drops only, not from falls that
+  follow a push during locomotion.
