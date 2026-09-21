@@ -168,6 +168,7 @@ class EventCfg:
         func=mdp.apply_upward_assist,
         mode="reset",
         params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="torso_link"),
             "max_force_scale": 0.8,
             "decay_steps": 30000,
         },

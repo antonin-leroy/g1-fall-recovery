@@ -57,6 +57,8 @@ def main():
     env_cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs)
     # the bank does not exist yet, so the event that reads it has to be off while we record it
     env_cfg.events.reset_from_bank = None
+    # and the training assist must be off too, otherwise the robots are held up as they fall
+    env_cfg.events.upward_assist = None
     # the episode must outlast a settling round, otherwise a time out would reset the robots mid-drop
     env_cfg.episode_length_s = 1e6
     # create environment

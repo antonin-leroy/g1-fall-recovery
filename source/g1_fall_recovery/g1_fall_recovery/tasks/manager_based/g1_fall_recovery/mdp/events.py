@@ -81,11 +81,16 @@ def apply_upward_assist(
     # linear anneal over the first ``decay_steps`` environment steps, then nothing
     progress = min(env.common_step_counter / decay_steps, 1.0)
     scale = max_force_scale * (1.0 - progress)
+    # body_ids stays a slice when the term is configured without an explicit SceneEntityCfg,
+    # because only the cfgs passed through the term params get resolved against the scene
+    body_ids = asset_cfg.body_ids
+    if isinstance(body_ids, slice):
+        body_ids = list(range(asset.num_bodies))[body_ids]
     # express the assist as a fraction of the robot weight so it does not depend on the model
     weight = asset.data.default_mass.to(env.device).sum(dim=1) * 9.81
-    forces = torch.zeros(len(env_ids), len(asset_cfg.body_ids), 3, device=env.device)
+    forces = torch.zeros(len(env_ids), len(body_ids), 3, device=env.device)
     forces[:, 0, 2] = scale * weight[env_ids]
     # is_global: the robot starts lying down, so "up" has to be the world up, not the body up
     asset.set_external_force_and_torque(
-        forces, torch.zeros_like(forces), body_ids=asset_cfg.body_ids, env_ids=env_ids, is_global=True
+        forces, torch.zeros_like(forces), body_ids=body_ids, env_ids=env_ids, is_global=True
     )
