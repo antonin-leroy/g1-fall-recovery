@@ -89,3 +89,10 @@ def stand_up_exp(
     height_error = torch.square(asset.data.root_pos_w[:, 2] - target_height)
     tilt_error = torch.square(asset.data.projected_gravity_b[:, 2] + 1.0)
     return torch.exp(-height_error / height_std**2 - tilt_error / upright_std**2)
+
+
+def base_lin_vel_xy_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Penalize horizontal base velocity, so the robot stands up in place instead of wandering off."""
+    # extract the used quantities (to enable type-hinting)
+    asset: Articulation = env.scene[asset_cfg.name]
+    return torch.sum(torch.square(asset.data.root_lin_vel_b[:, :2]), dim=1)

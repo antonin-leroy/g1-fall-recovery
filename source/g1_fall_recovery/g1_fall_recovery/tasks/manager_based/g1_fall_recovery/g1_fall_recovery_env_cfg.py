@@ -200,12 +200,33 @@ class RewardsCfg:
         },
     )
     upright_exp = RewTerm(func=mdp.upright_exp, weight=0.25, params={"std": 1.0})
+    # -- posture: standing up anywhere and in any way satisfies the task reward, so these say
+    # "in place, without sliding, and in a natural pose"
+    base_lin_vel_xy_l2 = RewTerm(func=mdp.base_lin_vel_xy_l2, weight=-0.5)
+    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
+    feet_slide = RewTerm(
+        func=mdp.feet_slide,
+        weight=-0.25,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*_ankle_roll_link"),
+        },
+    )
+    joint_deviation_arms = RewTerm(
+        func=mdp.joint_deviation_l1,
+        weight=-0.1,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_shoulder_.*", ".*_elbow_.*"])},
+    )
     # -- penalties
     dof_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
     dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.002)
+    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.008)
     # -- optional penalties
-    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=0.0)
+    dof_pos_limits = RewTerm(
+        func=mdp.joint_pos_limits,
+        weight=-1.0,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_ankle_.*"])},
+    )
 
 
 @configclass
