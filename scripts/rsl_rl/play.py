@@ -91,6 +91,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     agent_cfg: RslRlBaseRunnerCfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
 
+    # the upward assist is a training curriculum keyed on env.common_step_counter, which restarts
+    # at zero here: left enabled it would apply at full strength and throw the robot around
+    if getattr(env_cfg.events, "upward_assist", None) is not None:
+        env_cfg.events.upward_assist = None
+        print("[INFO]: upward assist disabled for playback")
+    # observation noise is a training aid, the deployed policy should see clean observations
+    env_cfg.observations.policy.enable_corruption = False
+
     # set the environment seed
     # note: certain randomizations occur in the environment initialization so we set the seed here
     env_cfg.seed = agent_cfg.seed
