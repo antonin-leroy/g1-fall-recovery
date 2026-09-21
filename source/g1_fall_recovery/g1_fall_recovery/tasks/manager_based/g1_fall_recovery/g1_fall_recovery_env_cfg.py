@@ -164,39 +164,12 @@ class EventCfg:
         },
     )
 
-    # spawn the robot face down, already touching the ground, with a random heading: the z offset
-    # is relative to the default standing height (0.74 m), so the pelvis starts at 0.12-0.17 m,
-    # and the pitch near pi/2 lays the body flat instead of dropping it from standing height
-    reset_base = EventTerm(
-        func=mdp.reset_root_state_uniform,
+    # start from a state a real fall produces: the bank is recorded offline by dropping robots
+    # and letting them settle, so the episode begins with the robot already at rest on the ground
+    # instead of in mid-air. Generate it with 'python scripts/make_fallen_bank.py'.
+    reset_from_bank = EventTerm(
+        func=mdp.reset_from_fallen_bank,
         mode="reset",
-        params={
-            "pose_range": {
-                "x": (-0.5, 0.5),
-                "y": (-0.5, 0.5),
-                "z": (-0.62, -0.57),
-                "roll": (-0.3, 0.3),
-                "pitch": (1.4, 1.75),
-                "yaw": (-3.14, 3.14),
-            },
-            "velocity_range": {
-                "x": (0.0, 0.0),
-                "y": (0.0, 0.0),
-                "z": (0.0, 0.0),
-                "roll": (0.0, 0.0),
-                "pitch": (0.0, 0.0),
-                "yaw": (0.0, 0.0),
-            },
-        },
-    )
-
-    reset_robot_joints = EventTerm(
-        func=mdp.reset_joints_by_scale,
-        mode="reset",
-        params={
-            "position_range": (0.8, 1.2),
-            "velocity_range": (0.0, 0.0),
-        },
     )
 
 
