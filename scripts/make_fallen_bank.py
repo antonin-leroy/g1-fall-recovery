@@ -36,9 +36,14 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import os
+import re
 
 import gymnasium as gym
 import torch
+
+FINGER_LINK_RE = re.compile(r"_(zero|one|two|three|four|five|six)_link$")
+"""The G1 finger links carry no collision geometry, so their frames drift below the floor and
+would dominate any "lowest body" measurement without a single real penetration."""
 
 from isaaclab.utils.math import random_orientation
 
@@ -71,6 +76,10 @@ def main():
 
     env.reset()
 
+    # only the links that actually collide tell us whether a robot is resting on the floor
+    collision_bodies = [i for i, name in enumerate(robot.body_names) if not FINGER_LINK_RE.search(name)]
+    print(f"[INFO]: measuring ground clearance on {len(collision_bodies)}/{robot.num_bodies} links")
+
     root_poses = []
     joint_positions = []
 
@@ -101,21 +110,8 @@ def main():
         # inside the floor makes the episode start on a depenetration kick. Lift each robot until
         # its lowest body clears the ground.
         body_z = robot.data.body_pos_w[..., 2] - env.scene.env_origins[:, 2].unsqueeze(1)
-        lowest = body_z.min(dim=1).values
+        lowest = body_z[:, collision_bodies].min(dim=1).values
         lift = torch.clamp(-lowest, min=0.0) + 0.005
-
-        if round_idx == 0:
-            # name the offending link before trusting the lift: a body frame sitting far from its
-            # collision geometry would make every robot look buried without any real penetration
-            worst = int(lowest.argmin())
-            worst_body = int(body_z[worst].argmin())
-            order = torch.argsort(body_z[worst])
-            print(f"[DEBUG]: env_origins[0] = {env.scene.env_origins[0].tolist()}")
-            print(f"[DEBUG]: worst env {worst}, lowest body '{robot.body_names[worst_body]}' at z={lowest[worst]:.3f}")
-            print("[DEBUG]: five lowest bodies of that robot:")
-            for i in order[:5]:
-                print(f"           {robot.body_names[int(i)]:<28} z={body_z[worst, int(i)]:+.3f}")
-            print(f"[DEBUG]: that robot's pelvis (root) z = {robot.data.root_pos_w[worst, 2].item():.3f}")
 
         # record the settled state, with positions relative to the environment origin
         root_pose = robot.data.root_state_w[:, 0:7].clone()
