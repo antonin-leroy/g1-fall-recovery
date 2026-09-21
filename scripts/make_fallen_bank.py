@@ -104,6 +104,19 @@ def main():
         lowest = body_z.min(dim=1).values
         lift = torch.clamp(-lowest, min=0.0) + 0.005
 
+        if round_idx == 0:
+            # name the offending link before trusting the lift: a body frame sitting far from its
+            # collision geometry would make every robot look buried without any real penetration
+            worst = int(lowest.argmin())
+            worst_body = int(body_z[worst].argmin())
+            order = torch.argsort(body_z[worst])
+            print(f"[DEBUG]: env_origins[0] = {env.scene.env_origins[0].tolist()}")
+            print(f"[DEBUG]: worst env {worst}, lowest body '{robot.body_names[worst_body]}' at z={lowest[worst]:.3f}")
+            print("[DEBUG]: five lowest bodies of that robot:")
+            for i in order[:5]:
+                print(f"           {robot.body_names[int(i)]:<28} z={body_z[worst, int(i)]:+.3f}")
+            print(f"[DEBUG]: that robot's pelvis (root) z = {robot.data.root_pos_w[worst, 2].item():.3f}")
+
         # record the settled state, with positions relative to the environment origin
         root_pose = robot.data.root_state_w[:, 0:7].clone()
         root_pose[:, 0:3] -= env.scene.env_origins
