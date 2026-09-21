@@ -181,29 +181,6 @@ so step 1 is optional.
 
 ---
 
-## Engineering notes
-
-Things that cost real time, written down so they cost it only once.
-
-**`Episode_Reward/<term>` is not an episode sum.** Isaac Lab divides it by
-`max_episode_length_s`, so it reads as `weight × mean(f)`. Reading it as a sum makes
-every number wrong by a factor of the episode length.
-
-**A `SceneEntityCfg` left as a default argument is never resolved.** Only the ones
-passed through a term's `params` are matched against the scene, so `body_ids` silently
-stays `slice(None)`.
-
-**The G1 has 44 bodies and many carry no collision geometry** — fingers, palms. Their
-frames drift freely below the floor, so a naive "is any body below ground" check
-reports 96% of the robots as buried when none of them are.
-
-**Curriculum events keyed on `env.common_step_counter` restart at zero in `play.py`.**
-The assist force was being applied at full strength during playback, throwing around a
-policy trained to stand without it. `play.py` now disables it explicitly — the same
-trap applies to anything deployed on hardware.
-
----
-
 ## Layout
 
 ```
