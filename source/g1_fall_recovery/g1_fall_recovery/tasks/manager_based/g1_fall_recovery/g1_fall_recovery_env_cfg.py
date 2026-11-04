@@ -23,7 +23,11 @@ from . import mdp
 # Pre-defined configs
 ##
 
-from isaaclab_assets import G1_MINIMAL_CFG  # isort: skip
+from .g1_cfg import G1_ACTION_SCALE, G1_REAL_CFG  # isort: skip
+
+# the 14 finger joints are useless to stand up and only dilute the exploration noise,
+# so only the 23 body joints are actuated by the policy
+BODY_JOINTS = [".*_hip_.*", ".*_knee_joint", ".*_ankle_.*", "torso_joint", ".*_shoulder_.*", ".*_elbow_.*"]
 
 
 ##
@@ -81,12 +85,12 @@ class MySceneCfg(InteractiveSceneCfg):
 class ActionsCfg:
     """Action specifications for the MDP."""
 
-    # the 14 finger joints are useless to stand up and only dilute the exploration noise,
-    # so only the 23 body joints are actuated by the policy
+    # per-joint scale: with the real motor gains a single scale would leave the arms either
+    # saturated or the knees too weak
     joint_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
-        joint_names=[".*_hip_.*", ".*_knee_joint", ".*_ankle_.*", "torso_joint", ".*_shoulder_.*", ".*_elbow_.*"],
-        scale=0.5,
+        joint_names=BODY_JOINTS,
+        scale=G1_ACTION_SCALE,
         use_default_offset=True,
     )
 
@@ -218,15 +222,23 @@ class RewardsCfg:
         weight=0.0,
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_shoulder_.*", ".*_elbow_.*"])},
     )
-    # -- penalties
-    dof_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5)
-    dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.002)
+    # -- penalties: with gamma 0.99 every step spent on the floor costs reward, so nothing but these
+    # stops the policy from getting up as violently as the motors allow. They start low enough not to
+    # freeze exploration and CurriculumCfg raises them once standing is learned.
+    dof_torques_l2 = RewTerm(func=mdp.joint_torques_l2, weight=-2.0e-5)
+    dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-5.0e-7)
+    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.005)
+    # penalizes speed directly: around -0.2 per step at 3 rad/s on every joint once fully weighted
+    dof_vel_l2 = RewTerm(
+        func=mdp.joint_vel_l2,
+        weight=-1.0e-4,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=BODY_JOINTS)},
+    )
     # -- optional penalties
     dof_pos_limits = RewTerm(
         func=mdp.joint_pos_limits,
         weight=0.0,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_ankle_.*"])},
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=BODY_JOINTS)},
     )
 
 
@@ -261,9 +273,21 @@ class CurriculumCfg:
         func=mdp.modify_reward_weight,
         params={"term_name": "joint_deviation_arms", "weight": -0.05, "num_steps": 40000},
     )
+    dof_torques_l2 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={"term_name": "dof_torques_l2", "weight": -5.0e-5, "num_steps": 40000},
+    )
+    dof_acc_l2 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={"term_name": "dof_acc_l2", "weight": -1.0e-6, "num_steps": 40000},
+    )
     action_rate_l2 = CurrTerm(
         func=mdp.modify_reward_weight,
-        params={"term_name": "action_rate_l2", "weight": -0.005, "num_steps": 40000},
+        params={"term_name": "action_rate_l2", "weight": -0.01, "num_steps": 40000},
+    )
+    dof_vel_l2 = CurrTerm(
+        func=mdp.modify_reward_weight,
+        params={"term_name": "dof_vel_l2", "weight": -1.0e-3, "num_steps": 40000},
     )
     dof_pos_limits = CurrTerm(
         func=mdp.modify_reward_weight,
@@ -294,7 +318,7 @@ class G1FallRecoveryEnvCfg(ManagerBasedRLEnvCfg):
     def __post_init__(self):
         """Post initialization."""
         # scene settings
-        self.scene.robot = G1_MINIMAL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.scene.robot = G1_REAL_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         # flat ground: nothing reads the height scanner any more
         self.scene.height_scanner = None
         # general settings

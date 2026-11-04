@@ -41,9 +41,9 @@ import re
 import gymnasium as gym
 import torch
 
-FINGER_LINK_RE = re.compile(r"_(zero|one|two|three|four|five|six)_link$")
-"""The G1 finger links carry no collision geometry, so their frames drift below the floor and
-would dominate any "lowest body" measurement without a single real penetration."""
+NO_COLLIDER_LINK_RE = re.compile(r"(_zero_link|_ankle_pitch_link|imu_link|pelvis_contour_link)$")
+"""The G1 links that carry no collision geometry in the full model. Their frames can sit below the
+floor without a single real penetration, so they are left out of the "lowest body" measurement."""
 
 from isaaclab.utils.math import random_orientation
 
@@ -77,7 +77,7 @@ def main():
     env.reset()
 
     # only the links that actually collide tell us whether a robot is resting on the floor
-    collision_bodies = [i for i, name in enumerate(robot.body_names) if not FINGER_LINK_RE.search(name)]
+    collision_bodies = [i for i, name in enumerate(robot.body_names) if not NO_COLLIDER_LINK_RE.search(name)]
     print(f"[INFO]: measuring ground clearance on {len(collision_bodies)}/{robot.num_bodies} links")
 
     root_poses = []
